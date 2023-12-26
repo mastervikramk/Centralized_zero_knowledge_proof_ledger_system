@@ -1,0 +1,16 @@
+{
+  "magic_number": "f9beb4d9",
+  "block_size": 285,
+  "block_header": {
+    "version": 1,
+    "prev_block_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "merkle_root": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+    "timestamp_readable": "2009-01-03 18:15:05 UTC",
+    "nbits": "1d00ffff",
+    "nonce": 2083236893
+  },
+  "transaction_count": 1,
+  "transactions": [
+    "01"
+  ]
+}
