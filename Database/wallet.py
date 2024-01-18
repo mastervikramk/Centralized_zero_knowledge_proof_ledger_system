@@ -1,9 +1,8 @@
-
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, JSON, Boolean, MetaData
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 # Creating an SQLite database
-engine = create_engine('sqlite:///wallet23.db', echo=True)
+engine = create_engine('sqlite:///wallet.db', echo=True)
 
 # Defining a base class for declarative models
 Base = declarative_base()
@@ -13,6 +12,7 @@ class Wallet(Base):
     __tablename__ = 'wallets'
     id = Column(Integer, primary_key=True)
     address = Column(String, unique=True, nullable=False)
+    authorized_to_create_money = Column(Boolean, default=False)
     utxos = relationship('Utxo', back_populates='wallet')
 
 # Defining the UTXO model
@@ -33,11 +33,10 @@ class Transaction(Base):
     outputs = Column(JSON, nullable=False)
     signatures = Column(JSON, nullable=False)
     create_money = Column(Boolean, nullable=False)
-    utxo_ids=Column(JSON,nullable=True)
+    spent_utxo_ids = Column(JSON, nullable=True)
     utxos = relationship('Utxo', back_populates='transaction')
 
-# Create the table in the database
-metadata = MetaData()
+# Create the tables in the database
 Base.metadata.create_all(bind=engine)
 
 # Create a session to interact with the database
@@ -47,7 +46,7 @@ session = Session()
 class WalletManager:
     @staticmethod
     def create_table():
-        # Create the table in the database
+        # Create the tables in the database
         Base.metadata.create_all(bind=engine)
         print("Tables 'wallets', 'utxos', 'transactions' created.")
 
@@ -60,22 +59,28 @@ class WalletManager:
         print(f"Wallet inserted: Address - {address}")
 
     @staticmethod
-    def insert_utxo(wallet_id, amount):
+    def insert_utxo(wallet_id, transaction_id, amount):
         # Insert a row into the 'utxos' table
-        utxo = Utxo(amount=amount, wallet_id=wallet_id)
+        utxo = Utxo(amount=amount, wallet_id=wallet_id, transaction_id=transaction_id)
         session.add(utxo)
         session.commit()
-        print(f"UTXO inserted: Wallet ID - {wallet_id}, Amount - {amount}")
-        return utxo  # Return the UTXO instance after insertion
-
+        print(f"UTXO inserted: Wallet ID - {wallet_id}, Transaction ID - {transaction_id}, Amount - {amount}")
+        return utxo
 
     @staticmethod
-    def create_transaction(inputs, outputs, signatures, create_money):
+    def create_transaction(inputs, outputs, signatures, create_money, spent_utxo_ids=None):
         # Insert a row into the 'transactions' table
-        transaction = Transaction(inputs=inputs, outputs=outputs, signatures=signatures, create_money=create_money)
+        transaction = Transaction(
+            inputs=inputs,
+            outputs=outputs,
+            signatures=signatures,
+            create_money=create_money,
+            spent_utxo_ids=spent_utxo_ids
+        )
         session.add(transaction)
         session.commit()
         print(f"Transaction inserted")
+        return transaction
 
     @staticmethod
     def fetch_wallet_by_address(address):
@@ -87,11 +92,39 @@ class WalletManager:
         # Fetch UTXOs based on wallet ID
         return session.query(Utxo).filter_by(wallet_id=wallet_id).all()
 
-    
     @staticmethod
     def is_utxo_spent(utxo_id):
-        # Check if a UTXO is spent by looking at the 'utxo_ids' column in transactions
-        return session.query(Transaction).filter(Transaction.utxo_ids.contains([utxo_id])).count() > 0
+        # Check if a UTXO is spent by looking at the 'spent_utxo_ids' column in transactions
+        return session.query(Transaction).filter(Transaction.spent_utxo_ids.contains([utxo_id])).count() > 0
+
+    @staticmethod
+    def authorize_address_to_create_money(address):
+        # Authorize the wallet with the given address to create money
+        wallet = WalletManager.fetch_wallet_by_address(address)
+        if wallet:
+            wallet.authorized_to_create_money = True
+            session.commit()
+            print(f"Wallet {address} authorized to create money.")
+        else:
+            print(f"Wallet with address {address} not found.")
+
+    @staticmethod
+    def create_money(authorized_address, destination_address, amount):
+        # Check if the wallet is authorized to create money
+        authorized_wallet = WalletManager.fetch_wallet_by_address(authorized_address)
+        destination_wallet = WalletManager.fetch_wallet_by_address(destination_address)  # Define destination_wallet here
+        if authorized_wallet and authorized_wallet.authorized_to_create_money and destination_wallet:
+        
+            # Create a new transaction
+            transaction = WalletManager.create_transaction(inputs=[], outputs=[{'address': destination_address, 'amount': amount}],
+                                                           signatures=[authorized_address], create_money=True)
+
+            # Insert new UTXO for the destination wallet
+            WalletManager.insert_utxo(destination_wallet.id, transaction.id, amount)
+
+            print(f"Money created and transferred successfully from {authorized_address} to {destination_address}")
+        else:
+            print("Unauthorized to create money or wallet not found.")
 
     @staticmethod
     def transfer_money(source_address, destination_address, amount):
@@ -110,6 +143,12 @@ class WalletManager:
             total_amount = sum(utxo.amount for utxo in available_utxos)
             # Check if the source wallet has sufficient funds
             if total_amount >= amount:
+                # Create outputs for the transaction
+                outputs = [
+                    {'address': destination_address, 'amount': amount},
+                    {'address': source_address, 'amount': total_amount - amount}
+                ]
+
                 # Create inputs for the transaction
                 inputs = []
                 utxo_ids_used = set()
@@ -128,24 +167,22 @@ class WalletManager:
 
                 # Check if selected UTXOs cover the transfer amount
                 if sum(entry['amount'] for entry in inputs) >= amount:
-                    # Create outputs for the transaction
-                    outputs = [
-                        {'address': destination_address, 'amount': amount},
-                        {'address': source_address, 'amount': sum(entry['amount'] for entry in inputs) - amount}
-                    ]
-
                     # Create a new transaction with utxo id and amount in inputs, and source address in signature
-                    transaction = Transaction(inputs=inputs, outputs=outputs, signatures=[source_address], create_money=False, utxo_ids=list(utxo_ids_used))
-                    session.add(transaction)
-                    session.commit()
+                    transaction = WalletManager.create_transaction(
+                        inputs=inputs,
+                        outputs=outputs,
+                        signatures=[source_address],
+                        create_money=False,
+                        spent_utxo_ids=list(utxo_ids_used)
+                    )
 
                     # Insert new UTXO for the destination wallet
-                    WalletManager.insert_utxo(destination_wallet.id, amount)
+                    WalletManager.insert_utxo(destination_wallet.id, transaction.id, amount)
 
                     # Leave the change UTXO in the UTXO table
                     if sum(entry['amount'] for entry in inputs) > amount:
                         change_amount = sum(entry['amount'] for entry in inputs) - amount
-                        change_utxo = WalletManager.insert_utxo(source_wallet.id, change_amount)
+                        change_utxo = WalletManager.insert_utxo(source_wallet.id, transaction.id, change_amount)
                         print(f"Change UTXO created: UTXO ID - {change_utxo.id}, Amount - {change_amount}")
 
                     print(f"Money transferred successfully from {source_address} to {destination_address}")
@@ -156,13 +193,17 @@ class WalletManager:
         else:
             print("Source or destination wallet not found.")
 
-
 # Example usage
 WalletManager.create_table()
 WalletManager.insert_wallet(address="Vikram")
 WalletManager.insert_wallet(address="Nandu")
+WalletManager.insert_wallet(address="Money_creator")
 
-WalletManager.insert_utxo(wallet_id=1, amount=100.0)
+# Authorize the wallet with address "Vikram" to create money
+WalletManager.authorize_address_to_create_money(address="Money_creator")
+
+# Create money using the authorized wallet and transfer it to another address
+WalletManager.create_money(authorized_address="Money_creator", destination_address="Vikram", amount=100.0)
 
 # Transfer money from source_address to destination_address
 WalletManager.transfer_money(source_address="Vikram", destination_address="Nandu", amount=50.0)
@@ -174,4 +215,7 @@ WalletManager.transfer_money(source_address="Nandu", destination_address="Vikram
 WalletManager.transfer_money(source_address="Vikram", destination_address="Nandu", amount=10.0)
 
 # Add another transaction
-WalletManager.transfer_money(source_address="Nandu", destination_address="Vikram", amount=90.0) #Output will show Insufficient balance
+WalletManager.transfer_money(source_address="Nandu", destination_address="Vikram", amount=90.0)  # Output will show Insufficient balance
+
+# Create money using the authorized wallet and transfer it to another address
+WalletManager.create_money(authorized_address="Money_creator", destination_address="Nandu", amount=100.0)
