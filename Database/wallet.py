@@ -3,7 +3,7 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 import inquirer
 
 # Creating an SQLite database
-engine = create_engine('sqlite:///wallet13.db', echo=True)
+engine = create_engine('sqlite:///wallet.db', echo=True)
 
 # Defining a base class for declarative models
 Base = declarative_base()
@@ -109,26 +109,46 @@ class WalletManager:
         else:
             print(f"Wallet with the address {address} not found.")
 
-    @staticmethod
-    def create_money(authorized_address, destination_address, amount):
-        # Check if the wallet is authorized to create money
-        authorized_wallet = WalletManager.fetch_wallet_by_address(authorized_address)
-        destination_wallet = WalletManager.fetch_wallet_by_address(destination_address)
+    #The following method checks whether the input parameters to the create_money method are valid
+    @classmethod
+    def validate_create_money_inputs(cls, authorized_address, destination_address, amount):
+        if not cls.is_valid_wallet_address(authorized_address):
+            return False, f"Invalid authorized address: {authorized_address}"
 
-        if authorized_wallet and authorized_wallet.authorize_address_to_create_money and destination_wallet:
-             # Create a new transaction
-            transaction = WalletManager.create_transaction(
-                inputs=[],
-                outputs=[{'address': destination_address, 'amount': amount}],
-                signatures=[authorized_address],
-                create_money=True
-            )
-            # Insert new UTXO for the destination wallet
-            WalletManager.create_utxo(destination_wallet.id, transaction.id, amount)
+        if not cls.is_valid_wallet_address(destination_address):
+            return False, f"Invalid destination address: {destination_address}"
 
-            print(f"Money created and transferred successfully from {authorized_address} to {destination_address}")
+        if not isinstance(amount, (int, float)) or amount <= 0:
+            return False, f"Invalid amount: {amount}"
+
+        authorized_wallet = cls.fetch_wallet_by_address(authorized_address)
+        if not authorized_wallet or not authorized_wallet.authorize_address_to_create_money:
+            return False, f"{authorized_address} is not authorized to create money"
+
+        return True, None
+    
+    #The following method allows to create money
+    @classmethod
+    def create_money(cls, authorized_address, destination_address, amount):
+        is_valid, error_message = cls.validate_create_money_inputs(
+            authorized_address, destination_address, amount
+        )
+
+        if is_valid:
+            destination_wallet = cls.fetch_wallet_by_address(destination_address)
+            if destination_wallet:
+                transaction = cls.create_transaction(
+                    inputs=[],
+                    outputs=[{'address': destination_address, 'amount': amount}],
+                    signatures=[authorized_address],
+                    create_money=True
+                )
+                cls.create_utxo(destination_wallet.id, transaction.id, amount)
+                print(f"Money created and transferred successfully from {authorized_address} to {destination_address}")
+            else:
+                print(f"Destination wallet not found: {destination_address}")
         else:
-            print("Unauthorized to create money or wallet not found.")
+            print(f"Create money validation failed: {error_message}")
 
     @staticmethod
     def is_utxo_spent(utxo_id):
@@ -154,12 +174,13 @@ class WalletManager:
     def show_utxos_and_select(cls, available_utxos, transfer_amount):
         # Filter out used UTXOs
         filtered_utxos = [utxo for utxo in available_utxos if utxo not in cls.used_utxos]
-
+        
+        #utxo information of the source address
         utxos_info = [
             (str(utxo.id), f"UTXO ID: {utxo.id}, Amount: {utxo.amount}")
             for utxo in filtered_utxos
         ]
-
+        #total available amount to the source address
         total_available_amount = sum(utxo.amount for utxo in filtered_utxos)
 
         print(f"\nAmount to be transferred: {transfer_amount}")
@@ -168,7 +189,7 @@ class WalletManager:
 
         for utxo_info in utxos_info:
             print(utxo_info[1])  # Print UTXO information
-
+        #Asks the user to select the utxos
         questions = [
             inquirer.Checkbox(
                 'utxos',
@@ -185,9 +206,10 @@ class WalletManager:
 
         # Corrected line to create utxos_dict
         utxos_dict = {utxo_id: utxo for utxo_id, utxo in zip(selected_utxos_ids, filtered_utxos)}
-
+        
+        #utxos selected by the users to cover the transfer amount
         selected_utxos = [utxos_dict[utxo_id] for utxo_id in selected_utxos_ids]
-
+        #total selected amount form the selected utxos
         total_selected_amount = sum(float(utxo.amount) for utxo in selected_utxos)
 
         print("\nSelected UTXOs:")
@@ -199,26 +221,59 @@ class WalletManager:
         else:
             print("\nSelected UTXOs do not cover the transfer amount. Please try again.")
             return cls.show_utxos_and_select(available_utxos, transfer_amount)
+    
+    #Checking whether the address is valid or not
+    @staticmethod
+    def is_valid_wallet_address(address):
+        return session.query(Wallet).filter_by(address=address).count() > 0
+    
+    #Checking whther the transfer details are valid or not
+    @classmethod
+    def is_valid_transfer_details(cls, transfer_details):
+        for detail in transfer_details:
+            destination_address = detail.get('address')
+            amount = detail.get('amount')
 
+            if not cls.is_valid_wallet_address(destination_address):
+                return False, f"Invalid destination address: {destination_address}"
 
+            if not isinstance(amount, (int, float)) or amount <= 0:
+                return False, f"Invalid amount for address {destination_address}: {amount}"
 
+        return True, None
+    
+    #Checking whether input parameters to the transfer_money method are valid or not
+    @classmethod
+    def validate_transfer(cls, source_address, transfer_details):
+        if not cls.is_valid_wallet_address(source_address):
+            return False, f"Invalid source address: {source_address}"
 
+        is_valid_details, error_message = cls.is_valid_transfer_details(transfer_details)
+        if not is_valid_details:
+            return False, error_message
+
+        return True, None
+    
+    #The following method allows to transfer money from one address to the many destination addresses
     @staticmethod
     def transfer_money(source_address, transfer_details):
-        source_wallet = WalletManager.fetch_wallet_by_address(source_address)
-       
-        if source_wallet:
-            #calculating available amount in source wallet
+        is_valid, error_message = WalletManager.validate_transfer(source_address, transfer_details)
+        #validaation check
+        if is_valid:
+            source_wallet = WalletManager.fetch_wallet_by_address(source_address)
             total_amount = WalletManager.calculate_total_balance(
                 WalletManager.fetch_available_utxos(source_wallet)
             )
-            transfer_amount = sum(detail['amount'] for detail in transfer_details)#amount to be transfered
-            #Checking if the available amount is greater than the transfer amount
+            #Amount to be transfered
+            transfer_amount = sum(detail['amount'] for detail in transfer_details)
+            
+            #checking whether the total balance in source wallet is more than the transfer amount
             if total_amount >= transfer_amount:
-                available_utxos= WalletManager.fetch_available_utxos(source_wallet)
-                #utxos which we want to be used 
-                selected_utxos_ids,total_selected_amount = WalletManager.show_utxos_and_select(available_utxos, transfer_amount)
-                #New transaction is created
+                available_utxos = WalletManager.fetch_available_utxos(source_wallet)
+                selected_utxos_ids, total_selected_amount = WalletManager.show_utxos_and_select(
+                    available_utxos, transfer_amount
+                )
+                #creating transaction
                 transaction = WalletManager.create_transaction(
                     inputs=selected_utxos_ids,
                     outputs=[
@@ -228,20 +283,19 @@ class WalletManager:
                     signatures=[source_address],
                     create_money=False
                 )
-             
+                #Destination addresses and amounts to be transfered
                 for detail in transfer_details:
                     destination_address = detail['address']
                     amount = detail['amount']
-                    #utxo is being created
                     WalletManager.create_utxo(
                         WalletManager.fetch_wallet_by_address(destination_address).id,
                         transaction.id,
                         amount
                     )
-                #Remaining amount after transfer(selected utxo-transfered amount)
+                #Total selected amount is the sum of utxos selected from which amount is to be transfered
                 remaining_change = total_selected_amount - transfer_amount
+                #Remaining change is left amount(new utxo to be created to the source address)
                 if remaining_change > 0:
-                    #new utxo is created for the remaing amount
                     change_utxo = WalletManager.create_utxo(source_wallet.id, transaction.id, remaining_change)
                     print(f"Change UTXO created: UTXO ID - {change_utxo.id}, Amount - {remaining_change}")
 
@@ -249,7 +303,8 @@ class WalletManager:
             else:
                 print(f"Insufficient funds in {source_address}. Available balance: {total_amount}")
         else:
-            print("Source wallet not found.")
+            print(f"Transfer validation failed: {error_message}")
+
 # Examples of using the WalletManager
 
 WalletManager.create_wallet(address="Vikram")
