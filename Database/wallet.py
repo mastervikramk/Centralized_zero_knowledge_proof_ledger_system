@@ -1,6 +1,9 @@
 from sqlalchemy import create_engine, Integer, Column, String, Float, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 import inquirer
+import ecdsa
+import hashlib
+import base58
 
 # Creating an SQLite database
 engine = create_engine('sqlite:///wallet.db', echo=True)
@@ -86,8 +89,40 @@ class WalletManager:
         session.commit()
         print(f'Transaction inserted')
         return transaction
+    
+    @staticmethod
+    def generate_crypto_key_pair():
+        private_key = ecdsa.SigningKey.generate()  # Private key
+        public_key = private_key.get_verifying_key()  # Public key
+        return private_key, public_key
+    
+    @staticmethod
+    def generate_crypto_address(public_key):
+        # Simplified address generation, not following Bitcoin's complete process
+        public_key_bytes = public_key.to_string()
+        sha256_hash = hashlib.sha256(public_key_bytes).digest()
+        ripemd160_hash = hashlib.new('ripemd160', sha256_hash).digest()
 
+        # Add base58 encoding
+        address = base58.b58encode(ripemd160_hash)
+        return address.decode('utf-8')
+    
+    @staticmethod
+    def sign_transaction(private_key, transaction_data):
+        signature = private_key.sign(transaction_data)
+        return signature
+    
+    @staticmethod
+    def verify_signature(public_key, transaction_data, signature):
+        try:
+            # Convert the transaction_data back to bytes
+            transaction_data_bytes = str(transaction_data).encode('utf-8')
 
+            # Verify the signature
+            public_key.verify(signature, transaction_data_bytes)
+            return True
+        except ecdsa.BadSignatureError:
+            return False
     @staticmethod
     def fetch_wallet_by_address(address):
          # Fetch a wallet based on address
@@ -129,21 +164,31 @@ class WalletManager:
     
     #The following method allows to create money
     @classmethod
-    def create_money(cls, authorized_address, destination_address, amount):
+    def create_money(cls, authorized_address, destination_address, amount,private_key,public_key):
         is_valid, error_message = cls.validate_create_money_inputs(
             authorized_address, destination_address, amount
         )
 
         if is_valid:
             destination_wallet = cls.fetch_wallet_by_address(destination_address)
-            if destination_wallet:
+            # Create a transaction_data dictionary
+            transaction_data = {
+                "inputs": [],
+                "outputs": [{"address": destination_wallet, "amount": amount}],
+                "create_money": True
+            }
+            # Sign the transaction_data
+            signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+            is_valid_signature=cls.verify_signature(public_key,transaction_data,signature)
+            if destination_wallet and is_valid_signature:
                 transaction = cls.create_transaction(
                     inputs=[],
                     outputs=[{'address': destination_address, 'amount': amount}],
-                    signatures=[authorized_address],
-                    create_money=True
+                    create_money=True,
+                    signatures=[signature.hex()]
                 )
                 cls.create_utxo(destination_wallet.id, transaction.id, amount)
+
                 print(f"Money created and transferred successfully from {authorized_address} to {destination_address}")
             else:
                 print(f"Destination wallet not found: {destination_address}")
@@ -256,7 +301,7 @@ class WalletManager:
     
     #The following method allows to transfer money from one address to the many destination addresses
     @staticmethod
-    def transfer_money(source_address, transfer_details):
+    def transfer_money(source_address, transfer_details,private_key,public_key):
         is_valid, error_message = WalletManager.validate_transfer(source_address, transfer_details)
         #validaation check
         if is_valid:
@@ -273,25 +318,36 @@ class WalletManager:
                 selected_utxos_ids, total_selected_amount = WalletManager.show_utxos_and_select(
                     available_utxos, transfer_amount
                 )
-                #creating transaction
-                transaction = WalletManager.create_transaction(
-                    inputs=selected_utxos_ids,
-                    outputs=[
-                        {'address': detail['address'], 'amount': detail['amount']}
-                        for detail in transfer_details
-                    ],
-                    signatures=[source_address],
-                    create_money=False
-                )
-                #Destination addresses and amounts to be transfered
-                for detail in transfer_details:
-                    destination_address = detail['address']
-                    amount = detail['amount']
-                    WalletManager.create_utxo(
-                        WalletManager.fetch_wallet_by_address(destination_address).id,
-                        transaction.id,
-                        amount
+                # Creating transaction_data dictionary
+                transaction_data = {
+                    "inputs": selected_utxos_ids,
+                    "outputs": [{'address': detail['address'], 'amount': detail['amount']} for detail in transfer_details],
+                    "create_money": False
+                }
+
+                # Sign the transaction_data
+                signature = WalletManager.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+                is_valid_signature=WalletManager.verify_signature(public_key,transaction_data,signature)
+                if is_valid_signature:
+                    # Create the transaction
+                    transaction = WalletManager.create_transaction(
+                        inputs=selected_utxos_ids,
+                        outputs=[{'address': detail['address'], 'amount': detail['amount']} for detail in transfer_details],
+                        create_money=False,
+                        signatures=[signature.hex()]
                     )
+                    #Destination addresses and amounts to be transfered
+                    for detail in transfer_details:
+                        destination_address = detail['address']
+                        amount = detail['amount']
+                        WalletManager.create_utxo(
+                            WalletManager.fetch_wallet_by_address(destination_address).id,
+                            transaction.id,
+                            amount
+                        )
+                else:
+                    print("Not valid signature")
+                    
                 #Total selected amount is the sum of utxos selected from which amount is to be transfered
                 remaining_change = total_selected_amount - transfer_amount
                 #Remaining change is left amount(new utxo to be created to the source address)
@@ -307,22 +363,32 @@ class WalletManager:
 
 # Examples of using the WalletManager
 
-WalletManager.create_wallet(address="Vikram")
-WalletManager.create_wallet(address="Nandu") 
-WalletManager.create_wallet(address="Vinay")
-WalletManager.create_wallet(address="Money_creator")
+private_key1, public_key1 = WalletManager.generate_crypto_key_pair()
+private_key2, public_key2 = WalletManager.generate_crypto_key_pair()
+private_key3, public_key3 = WalletManager.generate_crypto_key_pair()
+private_key4, public_key4 = WalletManager.generate_crypto_key_pair()
 
-WalletManager.authorize_address_to_create_money(address="Money_creator")
+address1 = WalletManager.generate_crypto_address(public_key1)
+address2 = WalletManager.generate_crypto_address(public_key2)
+address3 = WalletManager.generate_crypto_address(public_key3)
+address4 = WalletManager.generate_crypto_address(public_key4)
 
-WalletManager.create_money(authorized_address="Money_creator", destination_address="Vikram", amount=100.0)
-WalletManager.create_money(authorized_address="Money_creator", destination_address="Nandu", amount=200.0)
+WalletManager.create_wallet(address=address1)
+WalletManager.create_wallet(address=address2) 
+WalletManager.create_wallet(address=address3)
+WalletManager.create_wallet(address=address4)
+
+WalletManager.authorize_address_to_create_money(address=address4)
+
+WalletManager.create_money(authorized_address=address4, destination_address=address1,private_key=private_key4,public_key=public_key4,amount=100.0)
+WalletManager.create_money(authorized_address=address4, destination_address=address2,private_key=private_key4,public_key=public_key4, amount=200.0)
 
 #Transfer to more than one address
 transfer_details = [
-    {'address': "Nandu", 'amount': 50.0},
-    {'address': "Vinay", 'amount': 30.0},
+    {'address': address2, 'amount': 50.0},
+    {'address': address3, 'amount': 30.0},
 ]
 
-WalletManager.transfer_money(source_address="Vikram", transfer_details=transfer_details)
-WalletManager.transfer_money(source_address="Nandu", transfer_details=[{'address':"Vikram",'amount':140.00}])
-WalletManager.transfer_money(source_address="Nandu", transfer_details=[{'address':"Vinay",'amount':50.0}])
+WalletManager.transfer_money(source_address=address1, transfer_details=transfer_details,private_key=private_key1,public_key=public_key1)
+WalletManager.transfer_money(source_address=address2, transfer_details=[{'address':address1,'amount':140.00}],private_key=private_key2,public_key=public_key2)
+WalletManager.transfer_money(source_address=address2, transfer_details=[{'address':address3,'amount':50.0}],private_key=private_key2,public_key=public_key2)
