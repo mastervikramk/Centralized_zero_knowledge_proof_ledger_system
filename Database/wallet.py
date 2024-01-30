@@ -6,7 +6,7 @@ import hashlib
 import base58
 
 # Creating an SQLite database
-engine = create_engine('sqlite:///wallet.db', echo=True)
+engine = create_engine('sqlite:///wallet2.db', echo=True)
 
 # Defining a base class for declarative models
 Base = declarative_base()
@@ -146,7 +146,7 @@ class WalletManager:
 
     #The following method checks whether the input parameters to the create_money method are valid
     @classmethod
-    def validate_create_money_inputs(cls, authorized_address, destination_address, amount):
+    def verify_create_money_inputs(cls, authorized_address, destination_address, amount):
         if not cls.is_valid_wallet_address(authorized_address):
             return False, f"Invalid authorized address: {authorized_address}"
 
@@ -165,7 +165,8 @@ class WalletManager:
     #The following method allows to create money
     @classmethod
     def create_money(cls, authorized_address, destination_address, amount,private_key,public_key):
-        is_valid, error_message = cls.validate_create_money_inputs(
+        #C
+        is_valid, error_message = cls.verify_create_money_inputs(
             authorized_address, destination_address, amount
         )
 
@@ -179,7 +180,9 @@ class WalletManager:
             }
             # Sign the transaction_data
             signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+
             is_valid_signature=cls.verify_signature(public_key,transaction_data,signature)
+
             if destination_wallet and is_valid_signature:
                 transaction = cls.create_transaction(
                     inputs=[],
@@ -287,79 +290,96 @@ class WalletManager:
 
         return True, None
     
-    #Checking whether input parameters to the transfer_money method are valid or not
-    @classmethod
-    def validate_transfer(cls, source_address, transfer_details):
-        if not cls.is_valid_wallet_address(source_address):
-            return False, f"Invalid source address: {source_address}"
-
-        is_valid_details, error_message = cls.is_valid_transfer_details(transfer_details)
-        if not is_valid_details:
-            return False, error_message
-
-        return True, None
+   
     
     #The following method allows to transfer money from one address to the many destination addresses
-    @staticmethod
-    def transfer_money(source_address, transfer_details,private_key,public_key):
-        is_valid, error_message = WalletManager.validate_transfer(source_address, transfer_details)
-        #validaation check
+    @classmethod
+    def validate_transfer(cls, source_addresses, transfer_details_list):
+        for transfer_details in transfer_details_list:
+            source_address = transfer_details.get('source_address')
+            destination_address = transfer_details.get('destination_address')
+
+            if source_address not in source_addresses:
+                return False, f"Invalid source address: {source_address}"
+
+            if not cls.is_valid_wallet_address(destination_address):
+                return False, f"Invalid destination address: {destination_address}"
+
+            amount = transfer_details.get('amount')
+            if not isinstance(amount, (int, float)) or amount <= 0:
+                return False, f"Invalid amount for address {destination_address}: {amount}"
+
+        return True, None
+
+    @classmethod
+    def transfer_money(cls, source_addresses, transfer_details_list, private_keys, public_keys):
+        is_valid, error_message = cls.validate_transfer(source_addresses, transfer_details_list)
+
         if is_valid:
-            source_wallet = WalletManager.fetch_wallet_by_address(source_address)
-            total_amount = WalletManager.calculate_total_balance(
-                WalletManager.fetch_available_utxos(source_wallet)
-            )
-            #Amount to be transfered
-            transfer_amount = sum(detail['amount'] for detail in transfer_details)
-            
-            #checking whether the total balance in source wallet is more than the transfer amount
-            if total_amount >= transfer_amount:
-                available_utxos = WalletManager.fetch_available_utxos(source_wallet)
-                selected_utxos_ids, total_selected_amount = WalletManager.show_utxos_and_select(
-                    available_utxos, transfer_amount
+            for transfer_details, private_key, public_key in zip(transfer_details_list, private_keys, public_keys):
+                source_address = transfer_details.get('source_address')
+                destination_address = transfer_details.get('destination_address')
+                transfer_amount = transfer_details.get('amount', 0)
+
+                source_wallet = cls.fetch_wallet_by_address(source_address)
+                total_amount = cls.calculate_total_balance(
+                    cls.fetch_available_utxos(source_wallet)
                 )
-                # Creating transaction_data dictionary
-                transaction_data = {
-                    "inputs": selected_utxos_ids,
-                    "outputs": [{'address': detail['address'], 'amount': detail['amount']} for detail in transfer_details],
-                    "create_money": False
-                }
 
-                # Sign the transaction_data
-                signature = WalletManager.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
-                is_valid_signature=WalletManager.verify_signature(public_key,transaction_data,signature)
-                if is_valid_signature:
-                    # Create the transaction
-                    transaction = WalletManager.create_transaction(
-                        inputs=selected_utxos_ids,
-                        outputs=[{'address': detail['address'], 'amount': detail['amount']} for detail in transfer_details],
-                        create_money=False,
-                        signatures=[signature.hex()]
+                if total_amount >= transfer_amount:
+                    available_utxos = cls.fetch_available_utxos(source_wallet)
+                    selected_utxos_ids, total_selected_amount = cls.show_utxos_and_select(
+                        available_utxos, transfer_amount
                     )
-                    #Destination addresses and amounts to be transfered
-                    for detail in transfer_details:
-                        destination_address = detail['address']
-                        amount = detail['amount']
-                        WalletManager.create_utxo(
-                            WalletManager.fetch_wallet_by_address(destination_address).id,
-                            transaction.id,
-                            amount
-                        )
-                else:
-                    print("Not valid signature")
-                    
-                #Total selected amount is the sum of utxos selected from which amount is to be transfered
-                remaining_change = total_selected_amount - transfer_amount
-                #Remaining change is left amount(new utxo to be created to the source address)
-                if remaining_change > 0:
-                    change_utxo = WalletManager.create_utxo(source_wallet.id, transaction.id, remaining_change)
-                    print(f"Change UTXO created: UTXO ID - {change_utxo.id}, Amount - {remaining_change}")
 
-                print(f"Money transferred successfully from {source_address} to multiple addresses.")
-            else:
-                print(f"Insufficient funds in {source_address}. Available balance: {total_amount}")
+                    transaction_data = {
+                        "inputs": selected_utxos_ids,
+                        "outputs": [{'address': destination_address, 'amount': transfer_amount}],
+                        "create_money": False
+                    }
+
+                    signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+                    is_valid_signature = cls.verify_signature(public_key, transaction_data, signature)
+
+                    if is_valid_signature:
+                        transaction = cls.create_transaction(
+                            inputs=selected_utxos_ids,
+                            outputs=[{'address': destination_address, 'amount': transfer_amount}],
+                            create_money=False,
+                            signatures=[signature.hex()]
+                        )
+
+                        cls.create_utxo(
+                            cls.fetch_wallet_by_address(destination_address).id,
+                            transaction.id,
+                            transfer_amount
+                        )
+                    else:
+                        print("Not valid signature")
+
+                    remaining_change = total_selected_amount - transfer_amount
+
+                    if remaining_change > 0:
+                        change_utxo = cls.create_utxo(source_wallet.id, transaction.id, remaining_change)
+                        print(f"Change UTXO created: UTXO ID - {change_utxo.id}, Amount - {remaining_change}")
+
+                    print(f"Money transferred successfully from {source_address} to {destination_address}.")
+                else:
+                    print(f"Insufficient funds in {source_address}. Available balance: {total_amount}")
         else:
             print(f"Transfer validation failed: {error_message}")
+
+    @classmethod
+    def calculate_balance(cls, address):
+        wallet = cls.fetch_wallet_by_address(address)
+
+        if wallet:
+            available_utxos = cls.fetch_available_utxos(wallet)
+            total_balance = cls.calculate_total_balance(available_utxos)
+            return total_balance
+        else:
+            print(f"Wallet not found for address: {address}")
+            return 0.0  # Assuming a default balance of 0 if the wallet is not found
 
 # Examples of using the WalletManager
 
@@ -383,12 +403,21 @@ WalletManager.authorize_address_to_create_money(address=address4)
 WalletManager.create_money(authorized_address=address4, destination_address=address1,private_key=private_key4,public_key=public_key4,amount=100.0)
 WalletManager.create_money(authorized_address=address4, destination_address=address2,private_key=private_key4,public_key=public_key4, amount=200.0)
 
-#Transfer to more than one address
-transfer_details = [
-    {'address': address2, 'amount': 50.0},
-    {'address': address3, 'amount': 30.0},
+transfer_details_list = [
+    {'source_address': address1, 'destination_address': address3, 'amount': 30.0},
+    {'source_address': address2, 'destination_address': address3, 'amount': 40.0},
+   
 ]
 
-WalletManager.transfer_money(source_address=address1, transfer_details=transfer_details,private_key=private_key1,public_key=public_key1)
-WalletManager.transfer_money(source_address=address2, transfer_details=[{'address':address1,'amount':140.00}],private_key=private_key2,public_key=public_key2)
-WalletManager.transfer_money(source_address=address2, transfer_details=[{'address':address3,'amount':50.0}],private_key=private_key2,public_key=public_key2)
+# Private and public keys for multiple source addresses
+private_keys_list = [private_key1, private_key3]
+public_keys_list = [public_key1, public_key3]
+
+WalletManager.transfer_money(
+    source_addresses=[address1, address2],
+    transfer_details_list=transfer_details_list,
+    private_keys=private_keys_list,
+    public_keys=public_keys_list
+)
+balance = WalletManager.calculate_balance(address3)
+print(f"Current balance of {address3}: {balance}")
