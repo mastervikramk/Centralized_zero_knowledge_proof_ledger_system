@@ -6,7 +6,7 @@ import hashlib
 import base58
 
 # Creating an SQLite database
-engine = create_engine('sqlite:///wallet2.db', echo=True)
+engine = create_engine('sqlite:///wallet3.db', echo=True)
 
 # Defining a base class for declarative models
 Base = declarative_base()
@@ -57,6 +57,23 @@ session = Session()
 
 class WalletManager:
     @staticmethod
+    def generate_crypto_key_pair():
+        private_key = ecdsa.SigningKey.generate()  # Private key
+        public_key = private_key.get_verifying_key()  # Public key
+        return private_key, public_key
+    
+    @staticmethod
+    def generate_crypto_address(public_key):
+        # Simplified address generation, not following Bitcoin's complete process
+        public_key_bytes = public_key.to_string()
+        sha256_hash = hashlib.sha256(public_key_bytes).digest()
+        ripemd160_hash = hashlib.new('ripemd160', sha256_hash).digest()
+
+        # Add base58 encoding
+        address = base58.b58encode(ripemd160_hash)
+        return address.decode('utf-8')
+    
+    @staticmethod
     def create_wallet(address):
         # Inserting a row into the "wallets" table
         wallet = Wallet(address=address)
@@ -91,38 +108,17 @@ class WalletManager:
         return transaction
     
     @staticmethod
-    def generate_crypto_key_pair():
-        private_key = ecdsa.SigningKey.generate()  # Private key
-        public_key = private_key.get_verifying_key()  # Public key
-        return private_key, public_key
+    def authorize_address_to_create_money(address):
+         # Authorize the wallet with the given address to create money
+        wallet = WalletManager.fetch_wallet_by_address(address)
+        if wallet:
+            wallet.authorize_address_to_create_money = True
+            session.commit()
+            print(f"Wallet {address} authorized to create money.")
+        else:
+            print(f"Wallet with the address {address} not found.")
     
-    @staticmethod
-    def generate_crypto_address(public_key):
-        # Simplified address generation, not following Bitcoin's complete process
-        public_key_bytes = public_key.to_string()
-        sha256_hash = hashlib.sha256(public_key_bytes).digest()
-        ripemd160_hash = hashlib.new('ripemd160', sha256_hash).digest()
-
-        # Add base58 encoding
-        address = base58.b58encode(ripemd160_hash)
-        return address.decode('utf-8')
     
-    @staticmethod
-    def sign_transaction(private_key, transaction_data):
-        signature = private_key.sign(transaction_data)
-        return signature
-    
-    @staticmethod
-    def verify_signature(public_key, transaction_data, signature):
-        try:
-            # Convert the transaction_data back to bytes
-            transaction_data_bytes = str(transaction_data).encode('utf-8')
-
-            # Verify the signature
-            public_key.verify(signature, transaction_data_bytes)
-            return True
-        except ecdsa.BadSignatureError:
-            return False
     @staticmethod
     def fetch_wallet_by_address(address):
          # Fetch a wallet based on address
@@ -133,16 +129,10 @@ class WalletManager:
          # Fetch UTXOs based on wallet ID
         return session.query(Utxo).filter(Utxo.wallet_id == wallet_id).all()
 
+    #Checking whether the address is valid or not
     @staticmethod
-    def authorize_address_to_create_money(address):
-         # Authorize the wallet with the given address to create money
-        wallet = WalletManager.fetch_wallet_by_address(address)
-        if wallet:
-            wallet.authorize_address_to_create_money = True
-            session.commit()
-            print(f"Wallet {address} authorized to create money.")
-        else:
-            print(f"Wallet with the address {address} not found.")
+    def is_valid_wallet_address(address):
+        return session.query(Wallet).filter_by(address=address).count() > 0
 
     #The following method checks whether the input parameters to the create_money method are valid
     @classmethod
@@ -162,10 +152,27 @@ class WalletManager:
 
         return True, None
     
+    @staticmethod
+    def sign_transaction(private_key, transaction_data):
+        signature = private_key.sign(transaction_data)
+        return signature
+    
+    @staticmethod
+    def verify_signature(public_key, transaction_data, signature):
+        try:
+            # Convert the transaction_data back to bytes
+            transaction_data_bytes = str(transaction_data).encode('utf-8')
+
+            # Verify the signature
+            public_key.verify(signature, transaction_data_bytes)
+            return True
+        except ecdsa.BadSignatureError:
+            return False
+    
     #The following method allows to create money
     @classmethod
     def create_money(cls, authorized_address, destination_address, amount,private_key,public_key):
-        #C
+        
         is_valid, error_message = cls.verify_create_money_inputs(
             authorized_address, destination_address, amount
         )
@@ -270,29 +277,8 @@ class WalletManager:
             print("\nSelected UTXOs do not cover the transfer amount. Please try again.")
             return cls.show_utxos_and_select(available_utxos, transfer_amount)
     
-    #Checking whether the address is valid or not
-    @staticmethod
-    def is_valid_wallet_address(address):
-        return session.query(Wallet).filter_by(address=address).count() > 0
     
-    #Checking whther the transfer details are valid or not
-    @classmethod
-    def is_valid_transfer_details(cls, transfer_details):
-        for detail in transfer_details:
-            destination_address = detail.get('address')
-            amount = detail.get('amount')
-
-            if not cls.is_valid_wallet_address(destination_address):
-                return False, f"Invalid destination address: {destination_address}"
-
-            if not isinstance(amount, (int, float)) or amount <= 0:
-                return False, f"Invalid amount for address {destination_address}: {amount}"
-
-        return True, None
-    
-   
-    
-    #The following method allows to transfer money from one address to the many destination addresses
+    #The following code verifies the source addresses and transfer details list
     @classmethod
     def validate_transfer(cls, source_addresses, transfer_details_list):
         for transfer_details in transfer_details_list:
@@ -310,7 +296,8 @@ class WalletManager:
                 return False, f"Invalid amount for address {destination_address}: {amount}"
 
         return True, None
-
+    
+    #This code transfers the money from multiples source_addresses to multiple destination addresses
     @classmethod
     def transfer_money(cls, source_addresses, transfer_details_list, private_keys, public_keys):
         is_valid, error_message = cls.validate_transfer(source_addresses, transfer_details_list)
@@ -368,7 +355,8 @@ class WalletManager:
                     print(f"Insufficient funds in {source_address}. Available balance: {total_amount}")
         else:
             print(f"Transfer validation failed: {error_message}")
-
+    
+    #Calculating the balance in an address
     @classmethod
     def calculate_balance(cls, address):
         wallet = cls.fetch_wallet_by_address(address)
