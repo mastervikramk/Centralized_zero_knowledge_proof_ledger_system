@@ -1,12 +1,14 @@
 from sqlalchemy import create_engine, Integer, Column, String, Float, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from cryptography.hazmat.primitives import serialization
+from mnemonic import Mnemonic
 import inquirer
 import ecdsa
 import hashlib
 import base58
 
 # Creating an SQLite database
-engine = create_engine('sqlite:///wallet3.db', echo=True)
+engine = create_engine('sqlite:///wallet5.db', echo=True)
 
 # Defining a base class for declarative models
 Base = declarative_base()
@@ -55,12 +57,31 @@ Base.metadata.create_all(bind=engine)
 Session = sessionmaker(bind=engine)
 session = Session()
 
+
+
 class WalletManager:
+    #Generating private and public keys
     @staticmethod
+    # Function to generate private and public key pair
     def generate_crypto_key_pair():
-        private_key = ecdsa.SigningKey.generate()  # Private key
+        private_key = ecdsa.SigningKey.generate()  # Use MySigningKey instead of ecdsa.SigningKey
         public_key = private_key.get_verifying_key()  # Public key
         return private_key, public_key
+
+    # Initialize Mnemonic object with English wordlist
+    mnemo = Mnemonic("english")
+        # Generate BIP-39 mnemonic from private key
+    @staticmethod
+    def private_key_to_mnemonic(private_key):
+        # Ensure the private key length is 64 characters (32 bytes)
+        private_key_bytes = bytes.fromhex(private_key.zfill(64))
+        return WalletManager.mnemo.to_mnemonic(private_key_bytes)
+    
+    @staticmethod
+    # Convert mnemonic back to private key
+    def mnemonic_to_private_key( mnemonic):
+        entropy = WalletManager.mnemo.to_entropy(mnemonic)
+        return entropy.hex().lstrip('0')[:64]  # Remove leading zeros and ensure the string is 64 characters long (32 bytes)
     
     @staticmethod
     def generate_crypto_address(public_key):
@@ -168,11 +189,13 @@ class WalletManager:
             return True
         except ecdsa.BadSignatureError:
             return False
+
+
     
     #The following method allows to create money
     @classmethod
-    def create_money(cls, authorized_address, destination_address, amount,private_key,public_key):
-        
+    def create_money(cls, authorized_address, destination_address, public_key,amount):
+        #Verifying if the addresses are valid or not
         is_valid, error_message = cls.verify_create_money_inputs(
             authorized_address, destination_address, amount
         )
@@ -185,11 +208,19 @@ class WalletManager:
                 "outputs": [{"address": destination_wallet, "amount": amount}],
                 "create_money": True
             }
+            mnemonic_phrase=str(input("Enter the passphrase: "))
+
+            private_key_hex=cls.mnemonic_to_private_key(mnemonic_phrase)
+            
+            private_key = ecdsa.SigningKey.from_string(bytes.fromhex(private_key_hex))
+            
             # Sign the transaction_data
             signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
-
+            #Verifying the signature
             is_valid_signature=cls.verify_signature(public_key,transaction_data,signature)
 
+
+            #Creating transaction
             if destination_wallet and is_valid_signature:
                 transaction = cls.create_transaction(
                     inputs=[],
@@ -197,6 +228,7 @@ class WalletManager:
                     create_money=True,
                     signatures=[signature.hex()]
                 )
+                #Creating utxos
                 cls.create_utxo(destination_wallet.id, transaction.id, amount)
 
                 print(f"Money created and transferred successfully from {authorized_address} to {destination_address}")
@@ -204,6 +236,7 @@ class WalletManager:
                 print(f"Destination wallet not found: {destination_address}")
         else:
             print(f"Create money validation failed: {error_message}")
+
 
     @staticmethod
     def is_utxo_spent(utxo_id):
@@ -221,13 +254,13 @@ class WalletManager:
         #Calculating total balance of all the utxos
         return sum(utxo.amount for utxo in utxos)
     
-    #List which will keep the already selected utxos 
+    #List which will keep the already selected/used utxos 
     used_utxos = []
     
     #The following method is for selecting the particular utxos for transaction
     @classmethod
     def show_utxos_and_select(cls, available_utxos, transfer_amount):
-        # Filter out used UTXOs
+        # Not used utxos
         filtered_utxos = [utxo for utxo in available_utxos if utxo not in cls.used_utxos]
         
         #utxo information of the source address
@@ -299,11 +332,12 @@ class WalletManager:
     
     #This code transfers the money from multiples source_addresses to multiple destination addresses
     @classmethod
-    def transfer_money(cls, source_addresses, transfer_details_list, private_keys, public_keys):
+    def transfer_money(cls, source_addresses, transfer_details_list, public_keys):
+        #Verifying the transfer details
         is_valid, error_message = cls.validate_transfer(source_addresses, transfer_details_list)
 
         if is_valid:
-            for transfer_details, private_key, public_key in zip(transfer_details_list, private_keys, public_keys):
+            for transfer_details, public_key in zip(transfer_details_list,  public_keys):
                 source_address = transfer_details.get('source_address')
                 destination_address = transfer_details.get('destination_address')
                 transfer_amount = transfer_details.get('amount', 0)
@@ -312,7 +346,7 @@ class WalletManager:
                 total_amount = cls.calculate_total_balance(
                     cls.fetch_available_utxos(source_wallet)
                 )
-
+                #checking if the total amount in source address is greater than the transfer amount
                 if total_amount >= transfer_amount:
                     available_utxos = cls.fetch_available_utxos(source_wallet)
                     selected_utxos_ids, total_selected_amount = cls.show_utxos_and_select(
@@ -324,10 +358,17 @@ class WalletManager:
                         "outputs": [{'address': destination_address, 'amount': transfer_amount}],
                         "create_money": False
                     }
+                    mnemonic_phrase=str(input("Enter the passphrase: "))
 
+                    private_key_hex=cls.mnemonic_to_private_key(mnemonic_phrase)
+                    
+                    private_key = ecdsa.SigningKey.from_string(bytes.fromhex(private_key_hex))
+
+                    #Signing the transaction  data
                     signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+                    #Verifying the signature
                     is_valid_signature = cls.verify_signature(public_key, transaction_data, signature)
-
+                    #Creating transaction and utxos
                     if is_valid_signature:
                         transaction = cls.create_transaction(
                             inputs=selected_utxos_ids,
@@ -345,7 +386,7 @@ class WalletManager:
                         print("Not valid signature")
 
                     remaining_change = total_selected_amount - transfer_amount
-
+                    #Creating new utxo in the source address after destroying the used ones
                     if remaining_change > 0:
                         change_utxo = cls.create_utxo(source_wallet.id, transaction.id, remaining_change)
                         print(f"Change UTXO created: UTXO ID - {change_utxo.id}, Amount - {remaining_change}")
@@ -376,6 +417,19 @@ private_key2, public_key2 = WalletManager.generate_crypto_key_pair()
 private_key3, public_key3 = WalletManager.generate_crypto_key_pair()
 private_key4, public_key4 = WalletManager.generate_crypto_key_pair()
 
+
+private_key_hex4 = private_key4.to_string().hex()
+mnemonic_phrase4 = WalletManager.private_key_to_mnemonic(private_key_hex4)
+print(mnemonic_phrase4)
+recovered_private_key_hex4=WalletManager.mnemonic_to_private_key(mnemonic_phrase4)
+
+
+private_key_hex1 = private_key1.to_string().hex()
+mnemonic_phrase1 = WalletManager.private_key_to_mnemonic(private_key_hex1)
+print(mnemonic_phrase1)
+recovered_private_key_hex1=WalletManager.mnemonic_to_private_key(mnemonic_phrase1)
+
+
 address1 = WalletManager.generate_crypto_address(public_key1)
 address2 = WalletManager.generate_crypto_address(public_key2)
 address3 = WalletManager.generate_crypto_address(public_key3)
@@ -383,28 +437,28 @@ address4 = WalletManager.generate_crypto_address(public_key4)
 
 WalletManager.create_wallet(address=address1)
 WalletManager.create_wallet(address=address2) 
-WalletManager.create_wallet(address=address3)
+WalletManager.create_wallet(address=address3)   
 WalletManager.create_wallet(address=address4)
 
 WalletManager.authorize_address_to_create_money(address=address4)
 
-WalletManager.create_money(authorized_address=address4, destination_address=address1,private_key=private_key4,public_key=public_key4,amount=100.0)
-WalletManager.create_money(authorized_address=address4, destination_address=address2,private_key=private_key4,public_key=public_key4, amount=200.0)
+
+WalletManager.create_money(authorized_address=address4, destination_address=address1, public_key=public_key4, amount=100.0)
+# WalletManager.create_money(authorized_address=address4, destination_address=address2,private_key=private_key4,public_key=public_key4, amount=200.0)
 
 transfer_details_list = [
     {'source_address': address1, 'destination_address': address3, 'amount': 30.0},
-    {'source_address': address2, 'destination_address': address3, 'amount': 40.0},
+    # {'source_address': address2, 'destination_address': address3, 'amount': 40.0},
    
 ]
 
-# Private and public keys for multiple source addresses
-private_keys_list = [private_key1, private_key3]
-public_keys_list = [public_key1, public_key3]
+# # Private and public keys for multiple source addresses
+# private_keys_list = [private_key1, private_key3]
+public_keys_list = [public_key1]
 
 WalletManager.transfer_money(
     source_addresses=[address1, address2],
     transfer_details_list=transfer_details_list,
-    private_keys=private_keys_list,
     public_keys=public_keys_list
 )
 balance = WalletManager.calculate_balance(address3)
