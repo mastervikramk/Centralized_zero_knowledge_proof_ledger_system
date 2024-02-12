@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, Integer, Column, String, Float, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-from cryptography.hazmat.primitives import serialization
 from mnemonic import Mnemonic
 import inquirer
 import ecdsa
@@ -12,7 +11,6 @@ engine = create_engine('sqlite:///wallet5.db', echo=True)
 
 # Defining a base class for declarative models
 Base = declarative_base()
-
 
 # Defining the Wallet model
 class Wallet(Base):
@@ -73,15 +71,15 @@ class WalletManager:
         # Generate BIP-39 mnemonic from private key
     @staticmethod
     def private_key_to_mnemonic(private_key):
-        # Ensure the private key length is 64 characters (32 bytes)
-        private_key_bytes = bytes.fromhex(private_key.zfill(64))
+        #generating mnemonic of 18 words
+        private_key_bytes = bytes.fromhex(private_key)
         return WalletManager.mnemo.to_mnemonic(private_key_bytes)
     
     @staticmethod
     # Convert mnemonic back to private key
     def mnemonic_to_private_key( mnemonic):
         entropy = WalletManager.mnemo.to_entropy(mnemonic)
-        return entropy.hex().lstrip('0')[:64]  # Remove leading zeros and ensure the string is 64 characters long (32 bytes)
+        return entropy.hex()
     
     @staticmethod
     def generate_crypto_address(public_key):
@@ -179,11 +177,8 @@ class WalletManager:
         return signature
     
     @staticmethod
-    def verify_signature(public_key, transaction_data, signature):
+    def verify_signature(public_key, transaction_data_bytes, signature):
         try:
-            # Convert the transaction_data back to bytes
-            transaction_data_bytes = str(transaction_data).encode('utf-8')
-
             # Verify the signature
             public_key.verify(signature, transaction_data_bytes)
             return True
@@ -208,6 +203,7 @@ class WalletManager:
                 "outputs": [{"address": destination_wallet, "amount": amount}],
                 "create_money": True
             }
+            transaction_data_bytes=str(transaction_data).encode('utf-8')
             mnemonic_phrase=str(input("Enter the passphrase: "))
 
             private_key_hex=cls.mnemonic_to_private_key(mnemonic_phrase)
@@ -215,9 +211,9 @@ class WalletManager:
             private_key = ecdsa.SigningKey.from_string(bytes.fromhex(private_key_hex))
             
             # Sign the transaction_data
-            signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+            signature = cls.sign_transaction(private_key, transaction_data_bytes )
             #Verifying the signature
-            is_valid_signature=cls.verify_signature(public_key,transaction_data,signature)
+            is_valid_signature=cls.verify_signature(public_key,transaction_data_bytes,signature)
 
 
             #Creating transaction
@@ -358,6 +354,7 @@ class WalletManager:
                         "outputs": [{'address': destination_address, 'amount': transfer_amount}],
                         "create_money": False
                     }
+                    transaction_data_bytes=str(transaction_data).encode('utf-8')
                     mnemonic_phrase=str(input("Enter the passphrase: "))
 
                     private_key_hex=cls.mnemonic_to_private_key(mnemonic_phrase)
@@ -365,9 +362,9 @@ class WalletManager:
                     private_key = ecdsa.SigningKey.from_string(bytes.fromhex(private_key_hex))
 
                     #Signing the transaction  data
-                    signature = cls.sign_transaction(private_key, str(transaction_data).encode('utf-8'))
+                    signature = cls.sign_transaction(private_key, transaction_data_bytes)
                     #Verifying the signature
-                    is_valid_signature = cls.verify_signature(public_key, transaction_data, signature)
+                    is_valid_signature = cls.verify_signature(public_key, transaction_data_bytes, signature)
                     #Creating transaction and utxos
                     if is_valid_signature:
                         transaction = cls.create_transaction(
