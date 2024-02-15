@@ -168,13 +168,17 @@ address2=keypair2.create_address()
 address3=keypair3.create_address()
 address4=keypair4.create_address()
 
-Wallet.create_wallet(address=address1)
-Wallet.create_wallet(address=address2) 
-Wallet.create_wallet(address=address3)   
-Wallet.create_wallet(address=address4)
+Wallet1=Wallet(address=address1)
+Wallet2=Wallet(address=address2) 
+Wallet3=Wallet(address=address3)   
+Wallet4=Wallet(address=address4)
 
-Wallet.authorize_address_to_create_money(address=address4)
+Wallet1.create()
+Wallet2.create()
+Wallet3.create()
+Wallet4.create()
 
+Wallet4.authorize_address_to_create_money(address4)
 
 Ledger.create_money(authorized_address=address4, destination_address=address1, public_key=public_key4, amount=100.0)
 # WalletManager.create_money(authorized_address=address4, destination_address=address2,private_key=private_key4,public_key=public_key4, amount=200.0)
@@ -184,7 +188,6 @@ transfer_details_list = [
     # {'source_address': address2, 'destination_address': address3, 'amount': 40.0},
    
 ]
-
 # # Private and public keys for multiple source addresses
 # private_keys_list = [private_key1, private_key3]
 public_keys_list = [public_key1]

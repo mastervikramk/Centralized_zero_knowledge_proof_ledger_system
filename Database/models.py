@@ -8,40 +8,38 @@ import ecdsa
 Base = declarative_base()
 
 
-# Defining the Wallet model
 class Wallet(Base):
     __tablename__ = 'wallets'
     id = Column(Integer, primary_key=True)
     address = Column(String, unique=True, nullable=False)
     authorize_address_to_create_money = Column(Boolean, default=False)
-    #utxos represent all the utxos associated with wallet id
-    utxos = relationship('Utxo', back_populates='wallet') #can access utxos associated with the wallet
-    
-    @staticmethod
-    def create_wallet(address):
+    utxos = relationship('Utxo', back_populates='wallet')
+   
+    def __init__(self, address=None):
+        self.address = address
+
+    def create(self):
         # Inserting a row into the "wallets" table
-        wallet = Wallet(address=address)
+        wallet = Wallet(address=self.address)
         session.add(wallet)
         session.commit()
-        print(f"Wallet inserted: Address - {address}")
+        print(f"Wallet inserted: Address - {self.address}")
 
-    @staticmethod
-    def authorize_address_to_create_money(address):
+    def authorize_address_to_create_money(self,address):
         # Authorize the wallet with the given address to create money
-        wallet = Wallet.fetch_wallet_by_address(address)
+        wallet = self.fetch_wallet_by_address(address)
         if wallet:
             wallet.authorize_address_to_create_money = True
             session.commit()
-            print(f"Wallet {address} authorized to create money.")
+            print(f"Wallet {self.address} authorized to create money.")
         else:
             print(f"Wallet with the address {address} not found.")
 
     @staticmethod
     def fetch_wallet_by_address(address):
-        # Fetch a wallet based on address
+        # Fetch a wallet based on the provided address
         return session.query(Wallet).filter_by(address=address).first()
-    
-    
+
 
 
 # Defining the UTXO model
@@ -128,6 +126,8 @@ class Utxo(Base):
         total_selected_amount = sum(float(utxo.amount) for utxo in selected_utxos)
         
         return selected_utxos, total_selected_amount
+
+
 
 
 # Defining the Transaction model
@@ -221,6 +221,7 @@ class Transaction(Base):
 
         return True, None
     
+
 # Creating an SQLite database
 engine = create_engine('sqlite:///wallet.db', echo=True)
 
