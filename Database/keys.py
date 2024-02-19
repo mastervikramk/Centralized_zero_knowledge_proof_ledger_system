@@ -7,6 +7,7 @@ class KeyPair:
     def __init__(self):
         self.private_key = None
         self.public_key = None
+        self.create()  # Call the create method upon object creation
     
     # Generating private and public keys
     def create(self):
@@ -30,5 +31,7 @@ class KeyPair:
     @staticmethod
     def mnemonic_to_private_key(mnemonic):
         entropy = Mnemonic("english").to_entropy(mnemonic)
-        return entropy.hex()
+        private_key = ecdsa.SigningKey.from_string(bytes.fromhex(entropy.hex()))
+        return private_key
+
 

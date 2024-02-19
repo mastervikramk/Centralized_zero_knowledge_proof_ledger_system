@@ -17,15 +17,20 @@ class Wallet(Base):
    
     def __init__(self, address=None):
         self.address = address
+        if address:  
+            self.create()
 
     def create(self):
+        if not self.address:
+            print("Cannot create wallet without an address.")
+            return
+
         # Inserting a row into the "wallets" table
-        wallet = Wallet(address=self.address)
-        session.add(wallet)
+        session.add(self)  # Add the current instance to the session
         session.commit()
         print(f"Wallet inserted: Address - {self.address}")
 
-    def authorize_address_to_create_money(self,address):
+    def authorize_address_to_create_money(self, address):
         # Authorize the wallet with the given address to create money
         wallet = self.fetch_wallet_by_address(address)
         if wallet:
@@ -39,7 +44,6 @@ class Wallet(Base):
     def fetch_wallet_by_address(address):
         # Fetch a wallet based on the provided address
         return session.query(Wallet).filter_by(address=address).first()
-
 
 
 # Defining the UTXO model
@@ -79,14 +83,30 @@ class Utxo(Base):
         #Calculating total balance of all the utxos
         return sum(utxo.amount for utxo in utxos)
     
-    #List which will keep the already selected/used utxos 
-    used_utxos = []
-    
+    #Get the list of used UTXOs. If it doesn't exist, create an empty list.
+    @classmethod
+    def _get_used_utxos(cls):
+        if not hasattr(cls, '_used_utxos'):
+            cls._used_utxos = []
+        return cls._used_utxos
+
+    #Add a UTXO to the list of used UTXOs.
+    @classmethod
+    def _add_used_utxo(cls, utxo):
+        cls._get_used_utxos().append(utxo)
+
+    #Clear the list of used UTXOs.
+    @classmethod
+    def _clear_used_utxos(cls):
+        cls._get_used_utxos().clear()
+
     #The following method is for selecting the particular utxos for transaction
     @classmethod
     def show_utxos_and_select(cls, available_utxos, transfer_amount):
-        # Not used utxos
-        filtered_utxos = [utxo for utxo in available_utxos if utxo not in cls.used_utxos]
+        cls._clear_used_utxos()
+
+        # Accessing used utxos using class method
+        filtered_utxos = [utxo for utxo in available_utxos if utxo not in cls._get_used_utxos()]
         
         #utxo information of the source address
         utxos_info = [
@@ -115,7 +135,7 @@ class Utxo(Base):
         selected_utxos_ids = answers['utxos']
 
         # Store used UTXOs for persistence
-        cls.used_utxos.extend(utxo for utxo in filtered_utxos if utxo.id in selected_utxos_ids)
+        cls._add_used_utxo(utxo for utxo in filtered_utxos if utxo.id in selected_utxos_ids)
 
         # Corrected line to create utxos_dict
         utxos_dict = {utxo_id: utxo for utxo_id, utxo in zip(selected_utxos_ids, filtered_utxos)}
