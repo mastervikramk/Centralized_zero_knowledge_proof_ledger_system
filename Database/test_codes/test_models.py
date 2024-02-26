@@ -1,10 +1,14 @@
+
 import pytest
-import os,sys
-from unittest.mock import patch
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import os
+import sys
+from unittest.mock import patch,MagicMock
+from sqlalchemy.ext.declarative import declarative_base
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from codes.models import Wallet, Base
+from codes.models import Wallet, Utxo, Transaction
+
+# Define the base class for declarative class definitions
+Base = declarative_base()
 
 @pytest.fixture
 def mock_session():
@@ -19,7 +23,6 @@ def test_create_wallet(mock_session):
     mock_session.add.assert_called_once_with(wallet)
     mock_session.commit.assert_called_once()
 
-
 def test_fetch_wallet_by_address(mock_session):
     # Test fetching a wallet by address
     address = "test_address"
@@ -28,3 +31,66 @@ def test_fetch_wallet_by_address(mock_session):
 
     fetched_wallet = Wallet.fetch_wallet_by_address(address)
     assert fetched_wallet == wallet
+
+# Test Utxo creation
+def test_create_utxo(mock_session):
+    # Create a Utxo
+    utxo = Utxo.create_utxo(wallet_id=1, transaction_id=1, amount=10.0)
+    # Assert that add and commit were called on the mock session
+    mock_session.add.assert_called_once()
+    mock_session.commit.assert_called_once()
+
+def test_fetch_utxos_by_wallet(mock_session):
+    # Create some Utxos for a wallet
+    utxo1 = Utxo.create_utxo(wallet_id=1, transaction_id=1, amount=5.0)
+    utxo2 = Utxo.create_utxo(wallet_id=1, transaction_id=2, amount=8.0)
+
+    # Mock the behavior of the session's query method to return the created Utxos
+    mock_session.query.return_value.filter.return_value.all.return_value = [utxo1, utxo2]
+
+    # Fetch Utxos by wallet ID
+    utxos = Utxo.fetch_utxos_by_wallet(wallet_id=1)
+
+    # Check that the correct number of Utxos are returned
+    assert len(utxos) == 2
+    assert utxo1 in utxos
+    assert utxo2 in utxos
+
+
+def test_create_transaction(mock_session):
+    # Mock the UTXO objects for the inputs
+    utxo1 = MagicMock(id=1)
+    utxo2 = MagicMock(id=2)
+    utxo3 = MagicMock(id=3)
+    
+    # Simulate the behavior of Utxo.create_utxo to return these mock objects
+    mock_session.query().get.side_effect = [utxo1, utxo2, utxo3]
+
+    # Test creating a transaction with UTXO objects as inputs
+    inputs = [utxo1, utxo2, utxo3]  # UTXO objects instead of IDs
+    outputs = {"destination_address": "test_destination", "amount": 10.0}  # Example outputs
+    signatures = ["signature1", "signature2"]  # Example signatures
+    create_money = True  # Example value for create_money
+
+    transaction = Transaction.create_transaction(inputs, outputs, signatures, create_money)
+    
+    # Assert that add and commit were called on the mock session
+    mock_session.add.assert_called_once_with(transaction)
+    mock_session.commit.assert_called_once()
+
+
+def test_is_valid_wallet_address(mock_session):
+    # Test the is_valid_wallet_address method
+    mock_session.query().filter_by().count.return_value = 1  # Simulate a valid wallet address
+    
+    valid = Transaction.is_valid_wallet_address("test_address")
+    
+    assert valid == True
+
+    # Test with an invalid wallet address
+    mock_session.query().filter_by().count.return_value = 0  # Simulate an invalid wallet address
+    
+    valid = Transaction.is_valid_wallet_address("invalid_address")
+    
+    assert valid == False
+
