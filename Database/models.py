@@ -181,28 +181,26 @@ class Transaction(Base):
         print(f'Transaction inserted')
         return transaction
     
-    #Checking whether the address is valid or not
-    @staticmethod
-    def is_valid_wallet_address(address):
-        return session.query(Wallet).filter_by(address=address).count() > 0
-
-    #The following method checks whether the input parameters to the create_money method are valid
     @classmethod
     def verify_create_money_inputs(cls, authorized_address, destination_address, amount):
+        error = None
         if not cls.is_valid_wallet_address(authorized_address):
-            return False, f"Invalid authorized address: {authorized_address}"
-
+            error = f"Invalid authorized address: {authorized_address}"
+            return False, error
         if not cls.is_valid_wallet_address(destination_address):
-            return False, f"Invalid destination address: {destination_address}"
-
+            error = f"Invalid destination address: {destination_address}"
+            return False, error
         if not isinstance(amount, (int, float)) or amount <= 0:
-            return False, f"Invalid amount: {amount}"
-
-        authorized_wallet = Wallet.fetch_wallet_by_address(authorized_address)
-        if not authorized_wallet or not authorized_wallet.authorize_address_to_create_money:
-            return False, f"{authorized_address} is not authorized to create money"
-
+            error = f"Invalid amount: {amount}"
+            return False, error
+        if session.query(Wallet).filter_by(address=authorized_address).count() == 0:
+            error = f"{authorized_address} is not authorized to create money"
+            return False, error
         return True, None
+
+    @staticmethod
+    def is_valid_wallet_address(address):
+        return session.query(Wallet).filter_by(address=address).count()
 
     @staticmethod
     def sign_transaction(private_key, transaction_data):

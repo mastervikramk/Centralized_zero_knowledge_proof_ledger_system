@@ -2,9 +2,9 @@ import pytest
 import os
 import sys
 from pytest_mock import mocker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from codes.models import Wallet, Utxo, Transaction
+from models import Wallet, Utxo, Transaction
 from ecdsa import SigningKey, SECP256k1
 
 # Define the base class for declarative class definitions
@@ -14,7 +14,7 @@ Base = declarative_base()
 
 def test_create_wallet(mocker):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Test creating a wallet
     address = "test_address"
@@ -24,7 +24,7 @@ def test_create_wallet(mocker):
 
 def test_fetch_wallet_by_address(mocker):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Test fetching a wallet by address
     address = "test_address"
@@ -41,7 +41,7 @@ def test_fetch_wallet_by_address(mocker):
 
 def test_create_utxo(mocker):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Create a Utxo
     utxo = Utxo.create_utxo(wallet_id=1, transaction_id=1, amount=10.0)
@@ -51,7 +51,7 @@ def test_create_utxo(mocker):
 
 def test_fetch_utxos_by_wallet(mocker):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Create some Utxos for a wallet
     utxo1 = Utxo.create_utxo(wallet_id=1, transaction_id=1, amount=5.0)
@@ -74,7 +74,7 @@ def test_fetch_utxos_by_wallet(mocker):
 
 def test_create_transaction(mocker):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Mock the UTXO objects for the inputs
     utxo1 = mocker.MagicMock(id=1)
@@ -98,7 +98,7 @@ def test_create_transaction(mocker):
 
 def test_is_valid_wallet_address(mocker):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Test the is_valid_wallet_address method with a valid address
     mock_session.query().filter_by().count.return_value = 1  # Simulate a valid wallet address
@@ -122,7 +122,7 @@ def test_is_valid_wallet_address(mocker):
 ])
 def test_verify_create_money_inputs(mocker, authorized_address, destination_address, amount, expected_result, expected_error):
     # Mock the session object
-    mock_session = mocker.patch('codes.models.session')
+    mock_session = mocker.patch('models.session')
 
     # Mock the behavior of fetch_wallet_by_address method
     mock_wallet = mocker.MagicMock()

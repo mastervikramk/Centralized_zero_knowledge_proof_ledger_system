@@ -2,7 +2,7 @@ import pytest
 import sys, os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from codes.keys import KeyPair
+from keys import KeyPair
 
 @pytest.fixture
 def keypair():
