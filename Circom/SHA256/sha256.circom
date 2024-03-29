@@ -1,46 +1,50 @@
 pragma circom 2.0.0;
-// See ../Makefile for make instructions
-//
-//
-// Note: we need to be careful of the conversions
-// between ints and bytes and bit arrays
-// 
-// Two problems to be careful of:
-// - SHA256 is sensitive to the number of bits of
-//   of input. So extra 0 bits are not ignored
-// - It is too easy to reverse the order of 
-//   bytes or bits in bytes or bits in instructions
-// - input.json: specify the integers as json strings
-//   regular integers are restricted to 2^53
-//   but strings get converted to int/field
-// 
-// Num2Bits: out[0] is least-significant-bit of in
-// Bits2Num: in[0] becomes least-significant-bit of out
-// 
-// Note: this just computes the hash
-// You can see the output hash value in verifier/sha256_public.json
-// It doesn't actually verify anything
-// To do that you'd have to make the hash an input
 
 include "./circomlib/circuits/sha256/sha256.circom";
 include "./circomlib/circuits/bitify.circom";
 
-template SHA256Hasher(N) {
-    // inputs and hash are arrays of bits
-    signal input inputs[N];
+template SHA256Hasher() {
+    // Define input signals
+    signal input utxo_id[8];
+    signal input output_address[224];
+    signal input amount[8];
+
+    // Define hash signals
     signal input hash[256];
     signal output chash[256];
+    
+    // Concatenate all input arrays into a single input array
+    signal input_concat[240]; // Total length of all input arrays
 
-    component sha256hasher = Sha256(N);
-    for (var i = 0; i < N; i++) {
-        sha256hasher.in[i] <== inputs[i];
+    // Copy utxo_id to input_concat
+    for (var i = 0; i < 8; i++) {
+        input_concat[i] <== utxo_id[i];
     }
 
-    // the final assertion
+
+    // Copy output_address to input_concat
+    for (var i = 0; i < 224; i++) {
+        input_concat[8 + i] <== output_address[i];
+    }
+
+    // Copy amount to input_concat
+    for (var i = 0; i < 8; i++) {
+        input_concat[232 + i] <== amount[i];
+    }
+
+    // Instantiate the SHA-256 component with the concatenated input array
+    component sha256hasher = Sha256(240);
+
+    // Connect input_concat to sha256hasher
+    for (var i = 0; i < 240; i++) {
+        sha256hasher.in[i] <== input_concat[i];
+    }
+
+    // Connect the output of SHA-256 component to the hash signals
     for (var i = 0; i < 256; i++) {
         chash[i] <== sha256hasher.out[i];
-        hash[i] === sha256hasher.out[i];
+        hash[i] === chash[i];
     }
 }
 
-component main {public [inputs, hash]} = SHA256Hasher(8);
+component main {public [hash]} = SHA256Hasher();
