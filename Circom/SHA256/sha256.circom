@@ -14,7 +14,6 @@ template SHA256Hasher() {
     // Define hash signals
     signal input hash[256];
     signal output chash[256];
-
     var utxo=64,addr=224,amt=64,sig=768;
     
     var total=utxo+addr+amt+sig;
