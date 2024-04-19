@@ -1,0 +1,8 @@
+{
+    "input_utxo1":1,
+    "input_utxo2":2,
+    "output_utxo1":3,
+    "output_utxo2":4,
+    "signature1":6,
+    "signature2":12
+} 

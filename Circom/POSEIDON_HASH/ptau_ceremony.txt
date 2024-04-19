@@ -1,0 +1,23 @@
+# Start a new "powers of tau" ceremony
+snarkjs powersoftau new bn128 12 pot12_0000.ptau -v
+
+# Contribute to the ceremony
+snarkjs powersoftau contribute pot12_0000.ptau pot12_0001.ptau --name="First contribution" -v
+
+# Proceed to Phase 2
+snarkjs powersoftau prepare phase2 pot12_0001.ptau pot12_final.ptau -v
+
+# Generate a .zkey file for the circuit
+snarkjs groth16 setup transaction.r1cs pot12_final.ptau transaction_12_0000.zkey
+
+# Contribute to the phase 2 of the ceremony
+snarkjs zkey contribute transaction_12_0000.zkey transaction_12_0001.zkey --name="1st Contributor Name" -v
+
+# Export the verification key
+snarkjs zkey export verificationkey transaction_12_0001.zkey verification_key.json
+
+# Generate a Proof
+# Once the witness is computed and the trusted setup is executed, generate a zk-proof associated with the circuit and the witness
+snarkjs groth16 prove transaction_12_0001.zkey witness.wtns proof.json public.json
+
+snarkjs groth16 verify verification_key.json public.json proof.json
