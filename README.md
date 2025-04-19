@@ -41,10 +41,6 @@ This project simulates a **centralized blockchain-inspired system** for purchasi
 ---
 
 
-## 📂 Project Structure
-
-. ├── BitcoinParsing/ │ └── parse_blocks.py # Parses Bitcoin blocks for reference or integration │ ├── circom_program_and_proof/ │ ├── circuit.circom # Circom code for ZKP generation │ ├── proof_generator.js # Proof generation and verification │ ├── Database/ │ ├── models.py # DB schema for users, products, transactions, etc. │ ├── keys.py # Wallet key generation logic │ ├── wallet_manager.py # Handles UTXO creation and transfers │ ├── wallet.py # All-in-one wallet management (integrated version) │ └── test_wallet.py # Pytest unit tests for wallet functionality │ ├── requirements.txt └── README.md
-
 
 
 
