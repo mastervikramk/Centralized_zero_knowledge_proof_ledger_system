@@ -14,12 +14,12 @@ private_key3, public_key3 = keypair3.private_key,keypair3.public_key
 private_key4, public_key4 = keypair4.private_key,keypair4.public_key
 
 mnemonic_phrase4 = keypair4.private_key_to_mnemonic()
-print(mnemonic_phrase4)
+print("MNEMONIC OF MONEY CREATOR: ",mnemonic_phrase4)
 recovered_private_key_hex4=KeyPair.mnemonic_to_private_key(mnemonic_phrase4)
 
 
 mnemonic_phrase1 = keypair1.private_key_to_mnemonic()
-print(mnemonic_phrase1)
+print("MNEMONIC OF USER 1: ",mnemonic_phrase1)
 recovered_private_key_hex1=KeyPair.mnemonic_to_private_key(mnemonic_phrase1)
 
 address1=keypair1.create_address()
